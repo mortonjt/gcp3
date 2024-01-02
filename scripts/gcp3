@@ -11,7 +11,8 @@ import argparse
 
 def coverage_test(points : np.array, genome_length : int,
                   bin_size = 10000, sort=False):
-    """ Performs Chi-square test on interval list
+    """ Performs Chi-square test on interval list to see if
+    reads are uniformly distributed across genome.
 
     Parameters
     ----------
@@ -28,11 +29,15 @@ def coverage_test(points : np.array, genome_length : int,
 
 
 def check_pair_mapped(read):
+    # TODO this method does not work yet, since we
+    # need to find a quick way to access all of the read mates
     return (read.is_paired and not
             read.is_unmapped and not read.mate_is_unmapped)
 
 
 def check_pair_mapped_near(read, epsilon=2000):
+    # TODO this method does not work yet, since we
+    # need to find a quick way to access all of the read mates
     return (
         read.reference_name == read.next_reference_name and
         abs(read.template_length) <= epsilon
@@ -73,7 +78,7 @@ def main():
                 if read.reference_name == prev:
                     group[read.reference_name].append(read)
                 elif prev is None:
-                    # filter out reads that don't pass coverage test
+                    # filter out genomes that don't pass coverage test
 
                     # represents the starting position for each fragment
                     starts = np.array([r.query_alignment_start for r in group[prev]])
