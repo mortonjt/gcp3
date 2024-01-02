@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+
+import pysam
+import numba
+import pandas as pd
+from scipy.stats import chisquare
+import numpy as np
+from collections import defaultdict
+import argparse
+
+
+def coverage_test(points : np.array, genome_length : int,
+                  bin_size = 10000, sort=False):
+    """ Performs Chi-square test on interval list
+
+    Parameters
+    ----------
+    points : np.array
+       List of positions, either the start or end coordinates of the fragments.
+
+    """
+    if sort:
+        points = np.sort(points)
+
+    # discretize the points into the bins
+    hist = np.historam(points, genome_length // bin_size)[0]
+    return chisquare(hist)
+
+
+def check_pair_mapped(read):
+    return (read.is_paired and not
+            read.is_unmapped and not read.mate_is_unmapped)
+
+
+def check_pair_mapped_near(read, epsilon=2000):
+    return (
+        read.reference_name == read.next_reference_name and
+        abs(read.template_length) <= epsilon
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Process some reads.')
+    parser.add_argument('--input-bam', help='BAM reads file')
+    parser.add_argument('--output-bam', help='Filtered BAM file')
+    parser.add_argument('--binsize', type=int, help='size of bins',
+                        default=20000)
+    parser.add_argument('--pvalue-threshold', type=float, default=1e-3,
+                        help='pvalue threshold')
+    parser.add_argument('--epsilon', type=int,
+                        help=('neighborhood size for paired end mate '
+                              'to be considered in the same region'),
+                        default=2000)
+    args = parser.parse_args()
+    # It is important to note that the BAM files need to be sorted and that the
+    # forward/reverse read mates need to be paired
+
+    group = defaultdict(list)
+    prev = None
+    with pysam.AlignmentFile(args.input_bam, "rb") as input_file:
+        with pysam.AlignmentFile(args.output_bam, "wb", template=input_file) as output_file:
+            for read in input_file.fetch(until_eof=True):
+
+                # filter out reads if they aren't paired
+                if not check_pair_mapped(read):
+                    continue
+
+                # filter out reads if they don't map to the same organism
+                # and aren't within 2KB on the same genome
+                if not check_pair_mapped_near(read, epsilon):
+                    continue
+
+                if read.reference_name == prev:
+                    group[read.reference_name].append(read)
+                elif prev is None:
+                    # filter out reads that don't pass coverage test
+
+                    # represents the starting position for each fragment
+                    starts = np.array([r.query_alignment_start for r in group[prev]])
+
+                    # performs a homogeneity test to see if reads are uniformly
+                    # distributed across the reference genome
+                    _, p = coverage_test(starts,
+                                         genome_length=prev.reference_length,
+                                         binsize=args.binsize)
+                    if p < args.pvalue_threshold:
+                        for r in group[prev]:
+                            out.write(read)
+
+                        del group[read.reference_name]
+
+                prev = read.reference_name
+
+
+if __name__ == '__main__':
+    main()
